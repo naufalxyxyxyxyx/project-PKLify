@@ -1,4 +1,8 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:file_picker/file_picker.dart';
 
 void main() => runApp(const PklifyApp());
 
@@ -216,11 +220,7 @@ class StudentPage extends StatelessWidget {
         icon: Icons.edit_note_outlined,
         title: 'Jurnal kegiatan',
         text: 'Belum diisi',
-        onTap: () => form(context, 'Jurnal kegiatan', [
-          'Judul kegiatan',
-          'Deskripsi kegiatan',
-          'Hal yang dipelajari',
-        ], 'Kirim jurnal'),
+        onTap: () => journalForm(context),
       ),
       Item(
         icon: Icons.camera_alt_outlined,
@@ -575,3 +575,149 @@ void form(
     ),
   ),
 );
+
+Future<void> loginApi(
+  BuildContext context,
+  String identity,
+  String password,
+  bool student,
+  ValueChanged<bool> onLogin,
+) async {
+  if (identity.isEmpty || password.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Isi NIS/NIP dan kata sandi.')),
+    );
+    return;
+  }
+  try {
+    final response = await http.post(
+      Uri.parse('http://10.0.2.2/pklify_api/api.php?action=login'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'identity': identity,
+        'password': password,
+        'role': student ? 'siswa' : 'guru',
+      }),
+    );
+    final result = jsonDecode(response.body) as Map<String, dynamic>;
+    if (!context.mounted) return;
+    if (result['success'] == true) {
+      onLogin(result['user']['role'] == 'siswa');
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(result['message'] ?? 'Login gagal.')),
+      );
+    }
+  } catch (_) {
+    if (context.mounted)
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Tidak terhubung ke API. Pastikan Apache dan MySQL XAMPP aktif.',
+          ),
+        ),
+      );
+  }
+}
+
+void journalForm(BuildContext context) {
+  String? fileName;
+  showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    builder: (sheetContext) => StatefulBuilder(
+      builder: (context, setSheetState) => Padding(
+        padding: EdgeInsets.fromLTRB(
+          20,
+          20,
+          20,
+          24 + MediaQuery.viewInsetsOf(context).bottom,
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'Jurnal kegiatan',
+                style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 16),
+              const Padding(
+                padding: EdgeInsets.only(bottom: 10),
+                child: TextField(
+                  decoration: InputDecoration(
+                    labelText: 'Judul kegiatan',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.only(bottom: 10),
+                child: TextField(
+                  maxLines: 3,
+                  decoration: InputDecoration(
+                    labelText: 'Deskripsi kegiatan',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.only(bottom: 10),
+                child: TextField(
+                  decoration: InputDecoration(
+                    labelText: 'Hal yang dipelajari',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.only(bottom: 10),
+                child: TextField(
+                  maxLines: 2,
+                  decoration: InputDecoration(
+                    labelText: 'Kendala dan solusi',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ),
+              OutlinedButton.icon(
+                onPressed: () async {
+                  final result = await FilePicker.pickFiles(
+                    type: FileType.custom,
+                    allowedExtensions: [
+                      'pdf',
+                      'doc',
+                      'docx',
+                      'jpg',
+                      'jpeg',
+                      'png',
+                    ],
+                  );
+                  if (result.isNotEmpty)
+                    setSheetState(() => fileName = result.first.name);
+                },
+                icon: const Icon(Icons.attach_file),
+                label: Text(
+                  fileName == null ? 'Lampirkan file pendukung' : fileName!,
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.only(top: 6, bottom: 12),
+                child: Text(
+                  'Format: PDF, DOC, DOCX, JPG, JPEG, atau PNG.',
+                  style: TextStyle(fontSize: 12),
+                ),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(sheetContext),
+                style: FilledButton.styleFrom(backgroundColor: blue),
+                child: const Text('Kirim jurnal'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+}
