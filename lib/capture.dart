@@ -25,6 +25,18 @@ class _CapturePageState extends State<CapturePage> with WidgetsBindingObserver {
   String? error;
   bool busy = false;
   bool starting = false;
+  bool _foreground = true;
+  bool _restartWhenReady = false;
+  Future<void> _cameraReleased = Future.value();
+
+  void releaseCamera() {
+    final old = controller;
+    controller = null;
+    if (old != null) {
+      _cameraReleased = _cameraReleased.then((_) => old.dispose());
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -55,7 +67,11 @@ class _CapturePageState extends State<CapturePage> with WidgetsBindingObserver {
   }
 
   Future<void> initialize() async {
-    if (starting) return;
+    if (!mounted || !_foreground) return;
+    if (starting) {
+      _restartWhenReady = true;
+      return;
+    }
     starting = true;
     if (mounted) {
       setState(() {
@@ -64,9 +80,10 @@ class _CapturePageState extends State<CapturePage> with WidgetsBindingObserver {
       });
     }
     try {
-      await controller?.dispose();
-      controller = null;
+      releaseCamera();
+      await _cameraReleased;
       final cameras = await availableCameras();
+      if (!mounted || !_foreground) return;
       if (cameras.isEmpty) throw Exception('Kamera tidak tersedia.');
       final camera = cameras.firstWhere(
         (c) => c.lensDirection == CameraLensDirection.front,
@@ -79,8 +96,8 @@ class _CapturePageState extends State<CapturePage> with WidgetsBindingObserver {
       );
       controller = next;
       await next.initialize();
-      if (!mounted) {
-        await next.dispose();
+      if (!mounted || !_foreground || controller != next) {
+        if (controller == next) releaseCamera();
         return;
       }
       if (widget.locationRequired) await locate();
@@ -89,22 +106,33 @@ class _CapturePageState extends State<CapturePage> with WidgetsBindingObserver {
     } finally {
       starting = false;
       if (mounted) setState(() => busy = false);
+      if (_restartWhenReady && mounted && _foreground) {
+        _restartWhenReady = false;
+        initialize();
+      }
     }
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.inactive && !busy) {
-      controller?.dispose();
-      controller = null;
+    // Permission dialogs may be briefly inactive; release when truly hidden.
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      _foreground = false;
+      position = null;
+      releaseCamera();
     }
-    if (state == AppLifecycleState.resumed && controller == null) initialize();
+    if (state == AppLifecycleState.resumed) {
+      _foreground = true;
+      if (controller == null) initialize();
+    }
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    controller?.dispose();
+    _foreground = false;
+    releaseCamera();
     super.dispose();
   }
 
@@ -137,7 +165,10 @@ class _CapturePageState extends State<CapturePage> with WidgetsBindingObserver {
     });
     try {
       if (widget.locationRequired) await locate();
-      final file = await controller!.takePicture();
+      final camera = controller;
+      if (!mounted || !_foreground || camera == null) return;
+      final file = await camera.takePicture();
+      if (!mounted || !_foreground || controller != camera) return;
       final result = CaptureResult(
         await file.readAsBytes(),
         position,

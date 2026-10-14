@@ -6,10 +6,13 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'api.dart';
 import 'capture.dart';
+import 'lazy_sections.dart';
+import 'uploads.dart';
 
 typedef Json = Map<String, dynamic>;
-List<Json> rows(dynamic v) =>
-    (v as List? ?? []).map((e) => Map<String, dynamic>.from(e)).toList();
+List<Json> rows(dynamic v) => (v as List? ?? [])
+    .map((e) => e is Json ? e : Map<String, dynamic>.from(e))
+    .toList();
 String day([DateTime? d]) =>
     (d ?? DateTime.now()).toIso8601String().substring(0, 10);
 void main() => runApp(const PklifyApp());
@@ -278,32 +281,59 @@ class _HomeState extends State<Home> {
   String? error;
   bool loading = true;
   int index = 0;
+  Future<void>? _refreshInFlight;
+  DateTime? _lastRefresh;
+  List<Json> _students = [];
+  List<Json> _activities = [];
   bool get student => widget.user['role'] == 'siswa';
   bool get admin => widget.user['role'] == 'admin';
-  List<Json> get students => rows(data?['students']);
-  List<Json> get acts =>
-      students
-          .expand(
-            (s) =>
-                rows(s['activities'])
-                    .map((a) => {...a, 'student_name': s['user']['nama']}),
-          )
-          .toList()
-        ..sort((a, b) => '${b['created_at']}'.compareTo('${a['created_at']}'));
+  List<Json> get students => _students;
+  List<Json> get acts => _activities;
   @override
   void initState() {
     super.initState();
     refresh();
   }
 
-  Future<void> refresh() async {
+  Future<void> refresh({bool force = true}) {
+    if (_refreshInFlight != null) return _refreshInFlight!;
+    if (!force &&
+        _lastRefresh != null &&
+        DateTime.now().difference(_lastRefresh!) <
+            const Duration(seconds: 30)) {
+      return Future.value();
+    }
+    return _refreshInFlight = _loadOverview().whenComplete(
+      () => _refreshInFlight = null,
+    );
+  }
+
+  Future<void> _loadOverview() async {
     setState(() {
       loading = true;
       error = null;
     });
     try {
       final r = await Api.call('overview');
-      if (mounted) setState(() => data = r);
+      if (!mounted) return;
+      final nextStudents = rows(r['students']);
+      final nextActivities =
+          nextStudents
+              .expand(
+                (s) =>
+                    rows(s['activities'])
+                        .map((a) => {...a, 'student_name': s['user']['nama']}),
+              )
+              .toList()
+            ..sort(
+              (a, b) => '${b['created_at']}'.compareTo('${a['created_at']}'),
+            );
+      setState(() {
+        data = r;
+        _students = nextStudents;
+        _activities = nextActivities;
+        _lastRefresh = DateTime.now();
+      });
     } catch (e) {
       if (mounted) setState(() => error = '$e');
     } finally {
@@ -316,7 +346,11 @@ class _HomeState extends State<Home> {
       context,
       MaterialPageRoute(builder: (_) => page),
     );
-    if (changed == true && mounted) await refresh();
+    if (changed == true && mounted) {
+      // A request started before editing must not hide the newly saved data.
+      await _refreshInFlight;
+      if (mounted) await refresh();
+    }
   }
 
   Future<void> logout() async {
@@ -448,33 +482,52 @@ class _HomeState extends State<Home> {
     ];
   }
 
-  List<Widget> history() => [
-    if (!student)
-      ...students.map(
-        (s) => tile(
-          '${s['user']['nama']} • ${s['user']['identity']}',
-          '${s['placement']?['tempat'] ?? 'Belum ada penempatan'}\n${rows(s['activities']).length} aktivitas',
-          tap: () => edit(StudentDetail(student: s, teacher: !admin)),
+  Widget history() {
+    final calendar = student && students.isNotEmpty
+        ? rows(students.first['calendar'])
+        : <Json>[];
+    final audit = student && students.isNotEmpty
+        ? rows(students.first['audit'])
+        : <Json>[];
+    return LazySections(
+      storageKey: 'history',
+      sections: [
+        if (!student)
+          LazySection(students.length, (_, i) {
+            final s = students[i];
+            return tile(
+              '${s['user']['nama']} • ${s['user']['identity']}',
+              '${s['placement']?['tempat'] ?? 'Belum ada penempatan'}\n${(s['activities'] as List).length} aktivitas',
+              tap: () => edit(StudentDetail(student: s, teacher: !admin)),
+            );
+          }),
+        LazySection.single(
+          heading(student ? 'Riwayat aktivitas saya' : 'Aktivitas siswa'),
         ),
-      ),
-    heading(student ? 'Riwayat aktivitas saya' : 'Aktivitas siswa'),
-    if (acts.isEmpty) const Text('Belum ada aktivitas tersimpan.'),
-    ...acts.map(activityTile),
-    if (student) ...[
-      heading('Rekap hari kerja'),
-      if (rows(students.first['calendar']).isEmpty)
-        const Text('Belum ada hari PKL yang berjalan.'),
-      ...rows(students.first['calendar'])
-          .map((r) => tile(r['tanggal'], r['status'])),
-      heading('Catatan perubahan'),
-      ...rows(students.first['audit']).map(
-        (r) => tile(
-          r['action'],
-          '${r['created_at']} • ${r['nama']}\n${r['detail']}',
-        ),
-      ),
-    ],
-  ];
+        if (acts.isEmpty)
+          LazySection.single(const Text('Belum ada aktivitas tersimpan.')),
+        LazySection(acts.length, (_, i) => activityTile(acts[i])),
+        if (student) ...[
+          LazySection.single(heading('Rekap hari kerja')),
+          if (calendar.isEmpty)
+            LazySection.single(const Text('Belum ada hari PKL yang berjalan.')),
+          LazySection(
+            calendar.length,
+            (_, i) => tile(calendar[i]['tanggal'], calendar[i]['status']),
+          ),
+          LazySection.single(heading('Catatan perubahan')),
+          LazySection(audit.length, (_, i) {
+            final r = audit[i];
+            return tile(
+              r['action'],
+              '${r['created_at']} • ${r['nama']}\n${r['detail']}',
+            );
+          }),
+        ],
+      ],
+    );
+  }
+
   List<Widget> grades() {
     if (student) {
       final g = students.first['grade'];
@@ -577,7 +630,7 @@ class _HomeState extends State<Home> {
         : index == 0
         ? dashboard()
         : index == 1
-        ? history()
+        ? <Widget>[]
         : admin
         ? manage()
         : grades();
@@ -606,11 +659,14 @@ class _HomeState extends State<Home> {
           Expanded(
             child: RefreshIndicator(
               onRefresh: refresh,
-              child: ListView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(20),
-                children: content,
-              ),
+              child: index == 1 && data != null
+                  ? history()
+                  : ListView(
+                      key: PageStorageKey('home-$index'),
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.all(20),
+                      children: content,
+                    ),
             ),
           ),
         ],
@@ -618,8 +674,9 @@ class _HomeState extends State<Home> {
       bottomNavigationBar: NavigationBar(
         selectedIndex: index,
         onDestinationSelected: (v) {
+          if (v == index) return;
           setState(() => index = v);
-          refresh();
+          if (v != 3) refresh(force: false);
         },
         destinations: List.generate(
           4,
@@ -766,6 +823,11 @@ class _ActivityFormState extends State<ActivityForm> {
   }
 
   Future<void> pick() async {
+    if (busy) return;
+    setState(() {
+      busy = true;
+      error = null;
+    });
     try {
       final files = await FilePicker.pickFiles(
         type: FileType.custom,
@@ -774,10 +836,12 @@ class _ActivityFormState extends State<ActivityForm> {
             : ['pdf', 'doc', 'docx', 'jpg', 'jpeg', 'png', 'webp'],
       );
       if (files.isEmpty) return;
-      final content = await files.first.readAsBytes();
-      if (content.length > 5 * 1024 * 1024) {
+      final length = files.first.lengthSync();
+      if (length != null && length > maxUploadBytes) {
         throw ApiError('Maksimal ukuran file 5 MB.');
       }
+      if (!mounted) return;
+      final content = await readUpload(files.first.readAsByteStream());
       if (mounted) {
         setState(() {
           bytes = content;
@@ -786,6 +850,8 @@ class _ActivityFormState extends State<ActivityForm> {
       }
     } catch (e) {
       if (mounted) setState(() => error = '$e');
+    } finally {
+      if (mounted) setState(() => busy = false);
     }
   }
 
@@ -937,7 +1003,7 @@ class _ActivityFormState extends State<ActivityForm> {
         if (filename != null)
           Text('Lampiran: $filename • ${(bytes!.length / 1024).round()} KB'),
         if (capture != null) ...[
-          Image.memory(capture!.bytes, height: 200),
+          Image.memory(capture!.bytes, height: 200, cacheWidth: 640),
           if (capture!.position != null)
             Text(
               'Lokasi ${capture!.position!.latitude}, ${capture!.position!.longitude}\nAkurasi ±${capture!.position!.accuracy.toStringAsFixed(1)} meter',
@@ -990,27 +1056,33 @@ class _ActivityDetailState extends State<ActivityDetail> {
       );
       if (!mounted) return;
       if ('${widget.activity['mime']}'.startsWith('image/')) {
-        await showDialog<void>(
-          context: context,
-          builder: (ctx) => Dialog(
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Image.network(
-                    url.toString(),
-                    errorBuilder: (_, e, s) =>
-                        const Text('Foto gagal dimuat. Coba lagi.'),
-                  ),
-                  TextButton(
-                    onPressed: () => Navigator.pop(ctx),
-                    child: const Text('Tutup'),
-                  ),
-                ],
+        final preview = ResizeImage(NetworkImage(url.toString()), width: 1200);
+        try {
+          await showDialog<void>(
+            context: context,
+            builder: (ctx) => Dialog(
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Image(
+                      image: preview,
+                      errorBuilder: (_, e, s) =>
+                          const Text('Foto gagal dimuat. Coba lagi.'),
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('Tutup'),
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-        );
+          );
+        } finally {
+          // Download tickets have unique URLs; don't retain each photo in RAM.
+          await preview.evict();
+        }
       } else if (!await launchUrl(url, webOnlyWindowName: '_blank')) {
         throw ApiError('Tidak dapat membuka lampiran.');
       }
@@ -1136,63 +1208,68 @@ class StudentDetail extends StatelessWidget {
   final Json student;
   final bool teacher;
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: Text(student['user']['nama'])),
-    body: ListView(
-      padding: const EdgeInsets.all(20),
-      children: [
-        Text(
-          '${student['placement']?['tempat'] ?? 'Penempatan belum ditentukan'}',
-        ),
-        const Text(
-          'Rekap hari kerja',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-        ),
-        if (rows(student['calendar']).isEmpty)
-          const Text('Belum ada hari PKL yang berjalan.'),
-        ...rows(student['calendar']).map(
-          (r) =>
-              ListTile(title: Text(r['tanggal']), trailing: Text(r['status'])),
-        ),
-        const Text(
-          'Aktivitas',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-        ),
-        if (rows(student['activities']).isEmpty)
-          const Text('Belum ada aktivitas.'),
-        ...rows(student['activities']).map(
-          (a) => Card(
-            child: ListTile(
-              title: Text(a['title']),
-              subtitle: Text('${a['tanggal']} • ${a['status']}'),
-              onTap: () async {
-                final changed = await Navigator.push<bool>(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) =>
-                        ActivityDetail(activity: a, teacher: teacher),
-                  ),
-                );
-                if (changed == true && context.mounted) {
-                  Navigator.pop(context, true);
-                }
-              },
+  Widget build(BuildContext context) {
+    final calendar = rows(student['calendar']);
+    final activities = rows(student['activities']);
+    final audit = rows(student['audit']);
+    const heading = TextStyle(fontSize: 20, fontWeight: FontWeight.bold);
+    return Scaffold(
+      appBar: AppBar(title: Text(student['user']['nama'])),
+      body: LazySections(
+        sections: [
+          LazySection.single(
+            Text(
+              '${student['placement']?['tempat'] ?? 'Penempatan belum ditentukan'}',
             ),
           ),
-        ),
-        const Text(
-          'Catatan perubahan',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-        ),
-        ...rows(student['audit']).map(
-          (a) => ListTile(
-            title: Text(a['action']),
-            subtitle: Text('${a['created_at']} • ${a['nama']}\n${a['detail']}'),
+          LazySection.single(const Text('Rekap hari kerja', style: heading)),
+          if (calendar.isEmpty)
+            LazySection.single(const Text('Belum ada hari PKL yang berjalan.')),
+          LazySection(
+            calendar.length,
+            (_, i) => ListTile(
+              title: Text(calendar[i]['tanggal']),
+              trailing: Text(calendar[i]['status']),
+            ),
           ),
-        ),
-      ],
-    ),
-  );
+          LazySection.single(const Text('Aktivitas', style: heading)),
+          if (activities.isEmpty)
+            LazySection.single(const Text('Belum ada aktivitas.')),
+          LazySection(activities.length, (_, i) {
+            final a = activities[i];
+            return Card(
+              child: ListTile(
+                title: Text(a['title']),
+                subtitle: Text('${a['tanggal']} • ${a['status']}'),
+                onTap: () async {
+                  final changed = await Navigator.push<bool>(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          ActivityDetail(activity: a, teacher: teacher),
+                    ),
+                  );
+                  if (changed == true && context.mounted) {
+                    Navigator.pop(context, true);
+                  }
+                },
+              ),
+            );
+          }),
+          LazySection.single(const Text('Catatan perubahan', style: heading)),
+          LazySection(audit.length, (_, i) {
+            final a = audit[i];
+            return ListTile(
+              title: Text(a['action']),
+              subtitle: Text(
+                '${a['created_at']} • ${a['nama']}\n${a['detail']}',
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
 }
 
 class GradeForm extends StatelessWidget {

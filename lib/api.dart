@@ -10,7 +10,16 @@ class Api {
         ? 'http://localhost/pklify_api'
         : 'http://10.0.2.2/pklify_api',
   );
-  static String? token;
+  static String? _token;
+  static http.Client? _client;
+  static String? get token => _token;
+  static set token(String? value) {
+    // Keep connections within one login session, never across accounts.
+    _client?.close();
+    _client = null;
+    _token = value;
+  }
+
   static Future<Map<String, dynamic>> call(
     String action, [
     Map<String, dynamic> data = const {},
@@ -19,6 +28,7 @@ class Api {
   ]) async {
     try {
       final uri = Uri.parse('$base/v2.php?action=$action');
+      final client = _client ??= http.Client();
       final headers = <String, String>{
         if (token != null) 'Authorization': 'Bearer $token',
       };
@@ -29,11 +39,12 @@ class Api {
         req.files.add(
           http.MultipartFile.fromBytes('file', bytes, filename: filename),
         );
-        response = await http.Response.fromStream(
-          await req.send().timeout(const Duration(seconds: 30)),
-        );
+        response = await client
+            .send(req)
+            .then(http.Response.fromStream)
+            .timeout(const Duration(seconds: 30));
       } else {
-        response = await http
+        response = await client
             .post(
               uri,
               headers: {...headers, 'Content-Type': 'application/json'},
@@ -41,7 +52,10 @@ class Api {
             )
             .timeout(const Duration(seconds: 30));
       }
-      final result = jsonDecode(response.body) as Map<String, dynamic>;
+      final body = response.body;
+      final result = body.length > 65536 && !kIsWeb
+          ? await compute(_decodeResponse, body)
+          : _decodeResponse(body);
       if (result['success'] != true) {
         throw ApiError(result['message'] ?? 'Permintaan gagal.');
       }
@@ -55,6 +69,9 @@ class Api {
     }
   }
 }
+
+Map<String, dynamic> _decodeResponse(String body) =>
+    jsonDecode(body) as Map<String, dynamic>;
 
 class ApiError implements Exception {
   ApiError(this.message);

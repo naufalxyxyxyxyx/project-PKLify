@@ -19,28 +19,7 @@ function scope2($u,$id) {
 }
 function role2($u,$roles) { if(!in_array($u['role'],$roles,true)) fail2('Akses ditolak.',403); }
 function placement2($id) { return query2('SELECT p.*,u.nama AS guru FROM p2_placements p JOIN p2_users u ON u.id=p.guru_id WHERE siswa_id=?',[$id])->fetch() ?: null; }
-function workday2($p,$date) { return $p && $date >= $p['start_date'] && $date <= $p['end_date'] && in_array(date('N',strtotime($date)),explode(',',$p['work_days']),true) && !in_array($date,preg_split('/[\s,]+/',trim($p['holidays'])),true); }
-function calendar2($id,$p,$activities) {
- if(!$p) return [];
- $out=[]; $today=date('Y-m-d'); $last=min($today,$p['end_date']);
- for($day=$p['start_date'];$day<=$last;$day=date('Y-m-d',strtotime($day.' +1 day'))) {
-  if(!workday2($p,$day)) continue;
-  $in=false;$leave=false;$pending=false;
-  foreach($activities as $a) {
-   if($a['kind']==='masuk' && $a['tanggal']===$day) { if($a['status']==='disetujui') $in=true; if($a['status']==='menunggu') $pending=true; }
-   if($a['kind']==='izin' && $a['tanggal']<=$day && $a['end_date']>=$day) { if($a['status']==='disetujui') $leave=true; if($a['status']==='menunggu') $pending=true; }
-  }
-  $closed=$day<$today || date('H:i:s') >= $p['end_time'];
-  $status=$in?'hadir':($leave?'izin':($pending?'menunggu verifikasi':($closed?'alpa':'belum presensi')));
-  $out[]=['tanggal'=>$day,'status'=>$status,'closed'=>$closed];
- }
- return array_reverse($out);
-}
-function attendanceScore2($cal) {
- $total=0;$present=0;
- foreach($cal as $d) { if(!$d['closed']) continue; if($d['status']==='menunggu verifikasi') return null; if($d['status']==='izin') continue; $total++; if($d['status']==='hadir') $present++; }
- return $total ? round(100*$present/$total,2) : null;
-}
+require_once __DIR__ . '/calendar.php';
 function file2($photos=false,$required=false) {
  if(!isset($_FILES['file']) || $_FILES['file']['error']===UPLOAD_ERR_NO_FILE) { if($required) fail2('Foto atau lampiran wajib diunggah.'); return [null,null,null]; }
  $f=$_FILES['file']; if($f['error']!==UPLOAD_ERR_OK) fail2('Unggah gagal. Batas server mungkin terlampaui.');
@@ -80,13 +59,23 @@ try {
  if($action==='logout') { query2('DELETE FROM p2_sessions WHERE token=?',[hash('sha256',$token)]); ok2(); }
  if($action==='overview') {
   $students=$u['role']==='siswa'?[$u]:query2('SELECT u.id,u.nama,u.identity,u.role FROM p2_users u '.($u['role']==='guru'?'JOIN p2_placements p ON p.siswa_id=u.id WHERE p.guru_id=?':"WHERE u.role='siswa'").' ORDER BY u.nama',$u['role']==='guru'?[$u['id']]:[])->fetchAll();
-  $result=[];
+  $result=[]; $placements=[]; $activityGroups=[]; $grades=[];
+  $ids=array_column($students,'id');
+  if($ids) {
+   // IDs come only from the authenticated user's allowed student list.
+   $marks=implode(',',array_fill(0,count($ids),'?'));
+   foreach(query2("SELECT p.*,u.nama AS guru FROM p2_placements p JOIN p2_users u ON u.id=p.guru_id WHERE siswa_id IN ($marks)",$ids) as $p) $placements[$p['siswa_id']]=$p;
+   foreach(query2("SELECT * FROM p2_activities WHERE siswa_id IN ($marks) ORDER BY created_at DESC,id DESC",$ids) as $a) {
+    $a['has_file']=$a['file_name']!==null; unset($a['file_name']);
+    $activityGroups[$a['siswa_id']][]=$a;
+   }
+   foreach(query2("SELECT * FROM p2_grades WHERE siswa_id IN ($marks)",$ids) as $g) $grades[$g['siswa_id']]=$g;
+  }
   foreach($students as $s) {
-   $p=placement2($s['id']);
-   $acts=query2('SELECT * FROM p2_activities WHERE siswa_id=? ORDER BY created_at DESC,id DESC',[$s['id']])->fetchAll();
-   foreach($acts as &$a) { $a['has_file']=$a['file_name']!==null; unset($a['file_name']); } unset($a);
+   $p=$placements[$s['id']]??null;
+   $acts=$activityGroups[$s['id']]??[];
    $cal=calendar2($s['id'],$p,$acts);
-   $grade=query2('SELECT * FROM p2_grades WHERE siswa_id=?',[$s['id']])->fetch() ?: null;
+   $grade=$grades[$s['id']]??null;
    if($u['role']==='siswa' && $grade && !$grade['published_at']) $grade=null;
    $result[]=['user'=>$s,'placement'=>$p,'activities'=>$acts,'calendar'=>$cal,'attendance_score'=>attendanceScore2($cal),'grade'=>$grade,'audit'=>query2('SELECT a.action,a.detail,a.created_at,u.nama FROM p2_audit a JOIN p2_users u ON u.id=a.actor_id WHERE siswa_id=? ORDER BY a.id DESC LIMIT 100',[$s['id']])->fetchAll()];
   }
