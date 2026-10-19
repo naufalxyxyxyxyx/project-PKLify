@@ -8,6 +8,7 @@ import 'api.dart';
 import 'capture.dart';
 import 'lazy_sections.dart';
 import 'uploads.dart';
+import 'locations.dart';
 
 typedef Json = Map<String, dynamic>;
 List<Json> rows(dynamic v) => (v as List? ?? [])
@@ -150,9 +151,8 @@ class _LoginState extends State<Login> {
                     icon: Icon(
                       showPassword ? Icons.visibility_off : Icons.visibility,
                     ),
-                    onPressed: () => setState(
-                      () => showPassword = !showPassword,
-                    ),
+                    onPressed: () =>
+                        setState(() => showPassword = !showPassword),
                   ),
                 ),
                 onSubmitted: (_) {
@@ -395,6 +395,16 @@ class _HomeState extends State<Home> {
     if (mounted) widget.logout();
   }
 
+  Future<void> openLocation(Json s) async {
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => LocationPage(student: s, role: widget.user['role']),
+      ),
+    );
+    if (mounted) await refresh();
+  }
+
   Widget tile(String title, String text, {VoidCallback? tap}) => Card(
     child: ListTile(
       title: Text(title),
@@ -466,7 +476,7 @@ class _HomeState extends State<Home> {
         if (p?['latitude'] == null)
           tile(
             'Lokasi belum ditentukan',
-            'Admin perlu mengisi titik PKL. Presensi diajukan untuk pemeriksaan guru.',
+            'Ajukan tempat PKL melalui halaman Profil. Sebelum disetujui, presensi diajukan sebagai kendala.',
           ),
         heading('Aktivitas'),
         ...{
@@ -510,6 +520,14 @@ class _HomeState extends State<Home> {
       tile(
         '${a.where((r) => ['masuk', 'pulang'].contains(r['kind']) && r['status'] == 'menunggu').length} kendala presensi',
         'Periksa lokasi, foto, dan alasan siswa',
+      ),
+      heading('Lokasi PKL siswa'),
+      ...students.map(
+        (s) => tile(
+          s['user']['nama'],
+          '${rows(s['locations']).where((r) => r['status'] == 'menunggu').length} pengajuan menunggu • ${s['placement']?['tempat'] ?? 'Belum diatur'}',
+          tap: () => openLocation(s),
+        ),
       ),
       heading('Aktivitas terbaru'),
       if (a.isEmpty) const Text('Belum ada aktivitas siswa.'),
@@ -639,6 +657,80 @@ class _HomeState extends State<Home> {
     heading('Guru terdaftar'),
     ...rows(data?['teachers']).map((t) => tile(t['nama'], t['identity'])),
   ];
+  List<Widget> profile() {
+    final s = student && students.isNotEmpty ? students.first : null;
+    final p = s?['placement'];
+    final requests = rows(s?['locations']);
+    final latest = requests.isEmpty ? null : requests.first;
+    final proposed =
+        latest != null &&
+        ['menunggu', 'perlu_revisi'].contains(latest['status']);
+    final hasActive = p?['latitude'] != null && p?['longitude'] != null;
+    final place = proposed
+        ? latest['tempat']
+        : hasActive
+        ? p['tempat']
+        : null;
+    final status = proposed
+        ? latest['status'] == 'menunggu'
+              ? 'Menunggu persetujuan guru'
+              : 'Perlu perbaikan'
+        : hasActive
+        ? 'Disetujui'
+        : 'Belum mengajukan';
+    return [
+      banner(
+        widget.user['nama'],
+        student
+            ? 'NIS: ${widget.user['identity']}'
+                  '\n${s == null
+                      ? 'Data tempat PKL belum dimuat'
+                      : place == null
+                      ? 'Tempat PKL belum diisi'
+                      : 'Tempat PKL: $place'}'
+                  '${s == null ? '' : '\nStatus: $status'}'
+            : '${widget.user['role']} • ${widget.user['identity']}',
+      ),
+      if (student && s != null) ...[
+        if (proposed && '${latest['alamat'] ?? ''}'.isNotEmpty)
+          Text('Alamat pengajuan: ${latest['alamat']}'),
+        if (proposed && latest['status'] == 'perlu_revisi')
+          Text('Catatan guru: ${latest['feedback'] ?? ''}'),
+        if (proposed)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Text(
+              hasActive
+                  ? 'Lokasi presensi yang masih aktif: ${p['tempat']}. Pengajuan baru belum menggantikannya.'
+                  : 'Tempat yang diajukan belum menjadi titik presensi aktif. Tunggu persetujuan guru.',
+            ),
+          ),
+        FilledButton.icon(
+          onPressed: loading ? null : () => openLocation(s),
+          icon: const Icon(Icons.business_outlined),
+          label: Text(
+            latest?['status'] == 'menunggu'
+                ? 'Lihat pengajuan tempat PKL'
+                : latest?['status'] == 'perlu_revisi'
+                ? 'Perbaiki pengajuan tempat PKL'
+                : hasActive
+                ? 'Detail dan perubahan tempat PKL'
+                : 'Ajukan tempat PKL',
+          ),
+        ),
+        if (p == null)
+          const Text(
+            'Admin perlu menetapkan guru pembimbing dan jadwal agar pengajuan bisa dikirim.',
+          ),
+      ],
+      const SizedBox(height: 12),
+      const Text(
+        'Data mengikuti akun yang masuk. Muat ulang untuk melihat pembaruan.',
+      ),
+      OutlinedButton(onPressed: logout, child: const Text('Keluar dari akun')),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     final labels = admin
@@ -647,19 +739,7 @@ class _HomeState extends State<Home> {
         ? ['Beranda', 'Riwayat', 'Nilai', 'Profil']
         : ['Beranda', 'Monitoring', 'Penilaian', 'Profil'];
     final content = index == 3
-        ? <Widget>[
-            banner(
-              widget.user['nama'],
-              '${widget.user['role']} • ${widget.user['identity']}',
-            ),
-            const Text(
-              'Data mengikuti akun yang masuk. Muat ulang untuk melihat pembaruan.',
-            ),
-            OutlinedButton(
-              onPressed: logout,
-              child: const Text('Keluar dari akun'),
-            ),
-          ]
+        ? profile()
         : data == null
         ? <Widget>[]
         : index == 0
@@ -711,7 +791,7 @@ class _HomeState extends State<Home> {
         onDestinationSelected: (v) {
           if (v == index) return;
           setState(() => index = v);
-          if (v != 3) refresh(force: false);
+          if (v != 3 || student) refresh(force: false);
         },
         destinations: List.generate(
           4,
@@ -747,7 +827,7 @@ class PlacementForm extends StatelessWidget {
     return DataForm(
       title: 'Penempatan ${student['user']['nama']}',
       description:
-          'Guru tersedia: ${teachers.map((t) => "ID ${t['id']}: ${t['nama']}").join('; ')}.\nKoordinat harus sesuai titik presensi sebenarnya. Boleh dikosongkan sampai diketahui. Perubahan jadwal mengubah rekap dan mengembalikan nilai terbit ke draf.',
+          'Guru tersedia: ${teachers.map((t) => "ID ${t['id']}: ${t['nama']}").join('; ')}.\nAtur guru dan jadwal di sini. Titik dan alamat diatur melalui menu Lokasi PKL pada beranda. Perubahan guru membatalkan pengajuan lokasi yang menunggu. Perubahan jadwal mengembalikan nilai terbit ke draf.',
       fields: [
         Field(
           'guru_id',
@@ -757,20 +837,7 @@ class PlacementForm extends StatelessWidget {
             teachers.isEmpty ? '' : '${teachers.first['id']}',
           ),
         ),
-        Field('tempat', 'Nama tempat PKL', value: v('tempat')),
-        Field(
-          'latitude',
-          'Latitude (opsional)',
-          value: v('latitude'),
-          optional: true,
-        ),
-        Field(
-          'longitude',
-          'Longitude (opsional)',
-          value: v('longitude'),
-          optional: true,
-        ),
-        Field('radius', 'Radius dalam meter', value: v('radius', '40')),
+        const Field('reason', 'Alasan pengaturan atau perubahan penempatan'),
         Field(
           'start_date',
           'Tanggal mulai YYYY-MM-DD',

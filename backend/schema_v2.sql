@@ -43,3 +43,15 @@ CREATE TABLE IF NOT EXISTS p2_downloads (
  ticket CHAR(64) PRIMARY KEY, activity_id INT NOT NULL, expires_at DATETIME NOT NULL,
  FOREIGN KEY(activity_id) REFERENCES p2_activities(id)
 ) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS p2_location_requests (
+ id INT AUTO_INCREMENT PRIMARY KEY, siswa_id INT NOT NULL, actor_id INT NOT NULL,
+ tempat VARCHAR(150) NOT NULL, alamat VARCHAR(500) NOT NULL,
+ latitude DOUBLE NOT NULL, longitude DOUBLE NOT NULL,
+ reason TEXT NOT NULL, status VARCHAR(30) NOT NULL DEFAULT 'menunggu',
+ feedback TEXT NOT NULL, reviewed_by INT NULL, created_at DATETIME NOT NULL,
+ reviewed_at DATETIME NULL, base_version INT NOT NULL DEFAULT 0,
+ INDEX location_history(siswa_id,id),
+ FOREIGN KEY(siswa_id) REFERENCES p2_users(id),
+ FOREIGN KEY(actor_id) REFERENCES p2_users(id),
+ FOREIGN KEY(reviewed_by) REFERENCES p2_users(id)
+) ENGINE=InnoDB;

@@ -4,7 +4,7 @@ $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 $pdo->setAttribute(PDO::ATTR_EMULATE_PREPARES, false);
 $pdo->exec("SET time_zone = '+07:00'");
 function query2($sql,$args=[]) { global $pdo; $q=$pdo->prepare($sql); $q->execute($args); return $q; }
-function fail2($message,$code=422) { reply(['success'=>false,'message'=>$message],$code); }
+function fail2($message,$code=422) { global $pdo; if($pdo->inTransaction()) $pdo->rollBack(); reply(['success'=>false,'message'=>$message],$code); }
 function ok2($data=[]) { reply(['success'=>true]+$data); }
 function required2($d,$key,$max=10000) {
  $v=trim((string)($d[$key]??'')); if($v==='' || strlen($v)>$max) fail2("Isi $key dengan benar."); return $v;
@@ -20,6 +20,7 @@ function scope2($u,$id) {
 function role2($u,$roles) { if(!in_array($u['role'],$roles,true)) fail2('Akses ditolak.',403); }
 function placement2($id) { return query2('SELECT p.*,u.nama AS guru FROM p2_placements p JOIN p2_users u ON u.id=p.guru_id WHERE siswa_id=?',[$id])->fetch() ?: null; }
 require_once __DIR__ . '/calendar.php';
+require_once __DIR__ . '/locations.php';
 function file2($photos=false,$required=false) {
  if(!isset($_FILES['file']) || $_FILES['file']['error']===UPLOAD_ERR_NO_FILE) { if($required) fail2('Foto atau lampiran wajib diunggah.'); return [null,null,null]; }
  $f=$_FILES['file']; if($f['error']!==UPLOAD_ERR_OK) fail2('Unggah gagal. Batas server mungkin terlampaui.');
@@ -56,14 +57,16 @@ try {
  $token=preg_replace('/^Bearer /','',$auth);
  $u=query2('SELECT u.id,u.nama,u.role,u.identity FROM p2_sessions s JOIN p2_users u ON u.id=s.user_id WHERE s.token=? AND s.expires_at>NOW()',[hash('sha256',$token)])->fetch();
  if(!$u) fail2('Sesi berakhir. Silakan login kembali.',401);
+ handleLocation2($action,$d,$u);
  if($action==='logout') { query2('DELETE FROM p2_sessions WHERE token=?',[hash('sha256',$token)]); ok2(); }
  if($action==='overview') {
   $students=$u['role']==='siswa'?[$u]:query2('SELECT u.id,u.nama,u.identity,u.role FROM p2_users u '.($u['role']==='guru'?'JOIN p2_placements p ON p.siswa_id=u.id WHERE p.guru_id=?':"WHERE u.role='siswa'").' ORDER BY u.nama',$u['role']==='guru'?[$u['id']]:[])->fetchAll();
-  $result=[]; $placements=[]; $activityGroups=[]; $grades=[];
+  $result=[]; $placements=[]; $activityGroups=[]; $grades=[]; $locations=[];
   $ids=array_column($students,'id');
   if($ids) {
    // IDs come only from the authenticated user's allowed student list.
    $marks=implode(',',array_fill(0,count($ids),'?'));
+   foreach(query2("SELECT r.*,a.nama AS pengaju,v.nama AS pemeriksa FROM p2_location_requests r JOIN p2_users a ON a.id=r.actor_id LEFT JOIN p2_users v ON v.id=r.reviewed_by WHERE r.siswa_id IN ($marks) ORDER BY r.id DESC",$ids) as $r) $locations[$r['siswa_id']][]=$r;
    foreach(query2("SELECT p.*,u.nama AS guru FROM p2_placements p JOIN p2_users u ON u.id=p.guru_id WHERE siswa_id IN ($marks)",$ids) as $p) $placements[$p['siswa_id']]=$p;
    foreach(query2("SELECT * FROM p2_activities WHERE siswa_id IN ($marks) ORDER BY created_at DESC,id DESC",$ids) as $a) {
     $a['has_file']=$a['file_name']!==null; unset($a['file_name']);
@@ -77,7 +80,7 @@ try {
    $cal=calendar2($s['id'],$p,$acts);
    $grade=$grades[$s['id']]??null;
    if($u['role']==='siswa' && $grade && !$grade['published_at']) $grade=null;
-   $result[]=['user'=>$s,'placement'=>$p,'activities'=>$acts,'calendar'=>$cal,'attendance_score'=>attendanceScore2($cal),'grade'=>$grade,'audit'=>query2('SELECT a.action,a.detail,a.created_at,u.nama FROM p2_audit a JOIN p2_users u ON u.id=a.actor_id WHERE siswa_id=? ORDER BY a.id DESC LIMIT 100',[$s['id']])->fetchAll()];
+   $result[]=['user'=>$s,'placement'=>$p,'locations'=>$locations[$s['id']]??[],'activities'=>$acts,'calendar'=>$cal,'attendance_score'=>attendanceScore2($cal),'grade'=>$grade,'audit'=>query2('SELECT a.action,a.detail,a.created_at,u.nama FROM p2_audit a JOIN p2_users u ON u.id=a.actor_id WHERE siswa_id=? ORDER BY a.id DESC LIMIT 100',[$s['id']])->fetchAll()];
   }
   ok2(['user'=>$u,'students'=>$result,'teachers'=>$u['role']==='admin'?query2("SELECT id,nama,identity FROM p2_users WHERE role='guru'")->fetchAll():[],'server_time'=>date(DATE_ATOM)]);
  }
@@ -101,12 +104,23 @@ try {
   $radius=filter_var($d['radius']??40,FILTER_VALIDATE_INT); if($radius<1 || $radius>1000) fail2('Radius harus 1–1000 meter.');
   $holidays=trim($d['holidays']??''); if($holidays!=='') foreach(preg_split('/[\s,]+/',$holidays) as $h) date2($h);
   $pdo->beginTransaction();
-  query2('INSERT INTO p2_placements VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE guru_id=VALUES(guru_id),tempat=VALUES(tempat),latitude=VALUES(latitude),longitude=VALUES(longitude),radius=VALUES(radius),start_date=VALUES(start_date),end_date=VALUES(end_date),work_days=VALUES(work_days),start_time=VALUES(start_time),end_time=VALUES(end_time),holidays=VALUES(holidays)',[$id,$guru,required2($d,'tempat',150),$lat,$lng,$radius,$start,$end,$days,$st,$et,$holidays]);
+  query2('SELECT id FROM p2_users WHERE id=? FOR UPDATE',[$id]);
+  $old=placement2($id);
+  // Coordinates are managed exclusively by the versioned location workflow.
+  if($lat!==null && (!$old || $old['latitude']===null || $lat!=(float)$old['latitude'] || $lng!=(float)$old['longitude'])) fail2('Gunakan menu Lokasi PKL untuk menetapkan atau mengubah titik.');
+  if($old) { $lat=$old['latitude']; $lng=$old['longitude']; $radius=$old['radius']; }
+  if($old && (int)$old['guru_id']!==$guru) {
+   $reason=required2($d,'reason',2000);
+   locationSupersede2($id,$u['id'],'Guru pembimbing diganti: '.$reason.'. Ajukan kembali kepada guru baru.');
+  }
+  query2('INSERT INTO p2_placements VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE guru_id=VALUES(guru_id),tempat=VALUES(tempat),latitude=VALUES(latitude),longitude=VALUES(longitude),radius=VALUES(radius),start_date=VALUES(start_date),end_date=VALUES(end_date),work_days=VALUES(work_days),start_time=VALUES(start_time),end_time=VALUES(end_time),holidays=VALUES(holidays)',[$id,$guru,$old?$old['tempat']:'Belum ditentukan',$lat,$lng,$radius,$start,$end,$days,$st,$et,$holidays]);
   query2('UPDATE p2_grades SET published_at=NULL WHERE siswa_id=?',[$id]);
   audit2($u,$id,'penempatan_diubah',json_encode($d)); $pdo->commit(); ok2();
  }
  if($action==='activity') {
   role2($u,['siswa']); $id=$u['id']; $kind=$d['kind']??'';
+  $pdo->beginTransaction();
+  query2('SELECT id FROM p2_users WHERE id=? FOR UPDATE',[$id]);
   if(!in_array($kind,['jurnal','izin','masuk','pulang','dokumentasi'],true)) fail2('Jenis aktivitas salah.');
   $p=placement2($id); if(!$p) fail2('Admin belum mengatur penempatan PKL Anda.');
   $date=date2($d['tanggal']??date('Y-m-d')); $end=null; $lat=null;$lng=null;$acc=null;$dist=null; $status='menunggu';
@@ -132,9 +146,7 @@ try {
    elseif($date>date('Y-m-d')) fail2('Aktivitas belum terjadi.');
    if($kind==='dokumentasi') $status='tersimpan';
   }
-  $pdo->beginTransaction();
-  // Serialize per student, including duplicate attendance and leave checks.
-  query2('SELECT id FROM p2_users WHERE id=? FOR UPDATE',[$id]);
+  // Student lock also keeps the approved location stable until attendance commits.
   if($attendance) {
    if(query2('SELECT id FROM p2_activities WHERE siswa_id=? AND kind=? AND attendance_date=?',[$id,$kind,$date])->fetch()) fail2('Presensi ini sudah tercatat. Lihat riwayat.');
    if(query2("SELECT id FROM p2_activities WHERE siswa_id=? AND kind='izin' AND status='disetujui' AND tanggal<=? AND end_date>=?",[$id,$date,$date])->fetch()) fail2('Tanggal ini memiliki izin yang disetujui.');
