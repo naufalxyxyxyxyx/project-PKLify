@@ -62,6 +62,7 @@ class _LoginState extends State<Login> {
   String role = 'siswa';
   String? error;
   bool busy = false;
+  bool showPassword = false;
   @override
   void dispose() {
     id.dispose();
@@ -139,8 +140,21 @@ class _LoginState extends State<Login> {
               TextField(
                 controller: pw,
                 enabled: !busy,
-                obscureText: true,
-                decoration: const InputDecoration(labelText: 'Kata sandi'),
+                obscureText: !showPassword,
+                decoration: InputDecoration(
+                  labelText: 'Kata sandi',
+                  suffixIcon: IconButton(
+                    tooltip: showPassword
+                        ? 'Sembunyikan kata sandi'
+                        : 'Lihat kata sandi',
+                    icon: Icon(
+                      showPassword ? Icons.visibility_off : Icons.visibility,
+                    ),
+                    onPressed: () => setState(
+                      () => showPassword = !showPassword,
+                    ),
+                  ),
+                ),
                 onSubmitted: (_) {
                   if (!busy) login();
                 },
@@ -203,6 +217,9 @@ class _DataFormState extends State<DataForm> {
   late final c = {
     for (final f in widget.fields) f.key: TextEditingController(text: f.value),
   };
+  late final secretVisibility = {
+    for (final f in widget.fields.where((f) => f.secret)) f.key: false,
+  };
   bool busy = false;
   String? error;
   @override
@@ -252,8 +269,26 @@ class _DataFormState extends State<DataForm> {
               controller: c[f.key],
               enabled: !busy,
               maxLines: f.lines,
-              obscureText: f.secret,
-              decoration: InputDecoration(labelText: f.label),
+              obscureText: f.secret && !(secretVisibility[f.key] ?? false),
+              decoration: InputDecoration(
+                labelText: f.label,
+                suffixIcon: f.secret
+                    ? IconButton(
+                        tooltip: secretVisibility[f.key] == true
+                            ? 'Sembunyikan kata sandi'
+                            : 'Lihat kata sandi',
+                        icon: Icon(
+                          secretVisibility[f.key] == true
+                              ? Icons.visibility_off
+                              : Icons.visibility,
+                        ),
+                        onPressed: () => setState(
+                          () => secretVisibility[f.key] =
+                              !(secretVisibility[f.key] ?? false),
+                        ),
+                      )
+                    : null,
+              ),
             ),
           ),
         ),
