@@ -16,7 +16,11 @@ List<Json> rows(dynamic v) => (v as List? ?? [])
     .toList();
 String day([DateTime? d]) =>
     (d ?? DateTime.now()).toIso8601String().substring(0, 10);
-void main() => runApp(const PklifyApp());
+void main() {
+  Api.localMode = const bool.fromEnvironment('LOCAL_DEMO', defaultValue: true);
+  runApp(const PklifyApp());
+}
+
 const blue = Color(0xFF2864DC);
 
 class PklifyApp extends StatefulWidget {
@@ -679,6 +683,15 @@ class _HomeState extends State<Home> {
         ? 'Disetujui'
         : 'Belum mengajukan';
     return [
+      if (Api.localMode)
+        const Card(
+          child: Padding(
+            padding: EdgeInsets.all(12),
+            child: Text(
+              'Demo lokal: progres tersimpan di perangkat/browser ini, tidak dikirim ke server. Data MySQL lama tidak ditampilkan. Jangan hapus data situs atau gunakan mode incognito. Gunakan alamat dan port browser yang sama setiap kali menjalankan aplikasi. Peta tetap membutuhkan internet.',
+            ),
+          ),
+        ),
       banner(
         widget.user['nama'],
         student
@@ -1153,12 +1166,25 @@ class _ActivityDetailState extends State<ActivityDetail> {
     });
     try {
       final r = await Api.call('attachment', {'id': widget.activity['id']});
+      final localBytes = r['bytes'] as Uint8List?;
+      if (localBytes != null &&
+          !'${widget.activity['mime']}'.startsWith('image/')) {
+        await FilePicker.saveFile(
+          fileName: widget.activity['original_name'] ?? 'lampiran',
+          bytes: localBytes,
+          mimeType: widget.activity['mime'] ?? 'application/octet-stream',
+        );
+        return;
+      }
       final url = Uri.parse(
         '${Api.base}/v2.php?action=download&ticket=${r['ticket']}',
       );
       if (!mounted) return;
       if ('${widget.activity['mime']}'.startsWith('image/')) {
-        final preview = ResizeImage(NetworkImage(url.toString()), width: 1200);
+        final ImageProvider source = localBytes == null
+            ? NetworkImage(url.toString())
+            : MemoryImage(localBytes);
+        final preview = ResizeImage(source, width: 1200);
         try {
           await showDialog<void>(
             context: context,

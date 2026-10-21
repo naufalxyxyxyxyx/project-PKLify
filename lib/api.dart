@@ -3,7 +3,13 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+import 'local_backend.dart';
+import 'api_error.dart';
+export 'api_error.dart';
+
 class Api {
+  static bool localMode = false;
+  static LocalBackend local = LocalBackend();
   static const base = String.fromEnvironment(
     'API_BASE_URL',
     defaultValue: kIsWeb
@@ -26,6 +32,7 @@ class Api {
     Uint8List? bytes,
     String? filename,
   ]) async {
+    if (localMode) return local.call(action, data, token, bytes, filename);
     try {
       final uri = Uri.parse('$base/v2.php?action=$action');
       final client = _client ??= http.Client();
@@ -72,10 +79,3 @@ class Api {
 
 Map<String, dynamic> _decodeResponse(String body) =>
     jsonDecode(body) as Map<String, dynamic>;
-
-class ApiError implements Exception {
-  ApiError(this.message);
-  final String message;
-  @override
-  String toString() => message;
-}
