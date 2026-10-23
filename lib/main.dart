@@ -9,6 +9,7 @@ import 'capture.dart';
 import 'lazy_sections.dart';
 import 'uploads.dart';
 import 'locations.dart';
+import 'app_ui.dart';
 
 typedef Json = Map<String, dynamic>;
 List<Json> rows(dynamic v) => (v as List? ?? [])
@@ -35,14 +36,7 @@ class _AppState extends State<PklifyApp> {
   Widget build(BuildContext context) => MaterialApp(
     title: 'PKLify',
     debugShowCheckedModeBanner: false,
-    theme: ThemeData(
-      useMaterial3: true,
-      colorScheme: ColorScheme.fromSeed(seedColor: blue),
-      scaffoldBackgroundColor: const Color(0xFFF5F7FC),
-      inputDecorationTheme: const InputDecorationTheme(
-        border: OutlineInputBorder(),
-      ),
-    ),
+    theme: appTheme(),
     home: user == null
         ? Login(onLogin: (u) => setState(() => user = u))
         : Home(
@@ -76,6 +70,10 @@ class _LoginState extends State<Login> {
   }
 
   Future<void> login() async {
+    if (id.text.trim().isEmpty || pw.text.isEmpty) {
+      setState(() => error = 'Isi identitas dan kata sandi untuk masuk.');
+      return;
+    }
     setState(() {
       busy = true;
       error = null;
@@ -99,88 +97,167 @@ class _LoginState extends State<Login> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    body: Center(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 430),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Icon(Icons.school_outlined, size: 64, color: blue),
-              const Text(
-                'PKLify',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 34, fontWeight: FontWeight.w800),
-              ),
-              const Text(
-                'Catat kegiatan. Pantau perkembangan PKL.',
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 30),
-              SegmentedButton<String>(
-                segments: const [
-                  ButtonSegment(value: 'siswa', label: Text('Siswa')),
-                  ButtonSegment(value: 'guru', label: Text('Guru')),
-                  ButtonSegment(value: 'admin', label: Text('Admin')),
-                ],
-                selected: {role},
-                onSelectionChanged: busy
-                    ? null
-                    : (s) => setState(() => role = s.first),
-              ),
-              const SizedBox(height: 20),
-              TextField(
-                controller: id,
-                enabled: !busy,
-                decoration: InputDecoration(
-                  labelText: role == 'siswa'
-                      ? 'NIS'
-                      : role == 'guru'
-                      ? 'NIP'
-                      : 'Username admin',
-                ),
-              ),
-              const SizedBox(height: 14),
-              TextField(
-                controller: pw,
-                enabled: !busy,
-                obscureText: !showPassword,
-                decoration: InputDecoration(
-                  labelText: 'Kata sandi',
-                  suffixIcon: IconButton(
-                    tooltip: showPassword
-                        ? 'Sembunyikan kata sandi'
-                        : 'Lihat kata sandi',
-                    icon: Icon(
-                      showPassword ? Icons.visibility_off : Icons.visibility,
+    body: SafeArea(
+      child: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 430),
+            child: AutofillGroup(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Center(
+                    child: Container(
+                      padding: const EdgeInsets.all(18),
+                      decoration: BoxDecoration(
+                        color: blue,
+                        borderRadius: BorderRadius.circular(24),
+                      ),
+                      child: const Icon(
+                        Icons.school_rounded,
+                        size: 40,
+                        color: Colors.white,
+                      ),
                     ),
-                    onPressed: () =>
-                        setState(() => showPassword = !showPassword),
                   ),
-                ),
-                onSubmitted: (_) {
-                  if (!busy) login();
-                },
-              ),
-              if (error != null)
-                Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Text(
-                    error!,
-                    style: const TextStyle(color: Colors.red),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'PKLify',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 34, fontWeight: FontWeight.w800),
                   ),
-                ),
-              const SizedBox(height: 20),
-              FilledButton(
-                onPressed: busy ? null : login,
-                child: Text(busy ? 'Memeriksa akun…' : 'Masuk ke PKLify'),
+                  const Text(
+                    'Teman perjalanan PKL kamu.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Color(0xFF586982), height: 1.6),
+                  ),
+                  const SizedBox(height: 30),
+                  const Text(
+                    'Selamat datang kembali',
+                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
+                  ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Pilih peran dan masuk untuk melanjutkan kegiatan.',
+                    style: TextStyle(color: Color(0xFF586982), height: 1.5),
+                  ),
+                  const SizedBox(height: 20),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 8,
+                    children:
+                        const {
+                              'siswa': 'Siswa',
+                              'guru': 'Guru',
+                              'admin': 'Admin',
+                            }.entries
+                            .map(
+                              (entry) => ChoiceChip(
+                                label: Text(entry.value),
+                                selected: role == entry.key,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 10,
+                                ),
+                                onSelected: busy
+                                    ? null
+                                    : (_) => setState(() {
+                                        role = entry.key;
+                                        error = null;
+                                      }),
+                              ),
+                            )
+                            .toList(),
+                  ),
+                  const SizedBox(height: 20),
+                  TextField(
+                    controller: id,
+                    enabled: !busy,
+                    textInputAction: TextInputAction.next,
+                    autofillHints: const [AutofillHints.username],
+                    decoration: InputDecoration(
+                      prefixIcon: const Icon(Icons.badge_outlined),
+                      labelText: role == 'siswa'
+                          ? 'NIS'
+                          : role == 'guru'
+                          ? 'NIP'
+                          : 'Username admin',
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: pw,
+                    enabled: !busy,
+                    obscureText: !showPassword,
+                    autofillHints: const [AutofillHints.password],
+                    decoration: InputDecoration(
+                      prefixIcon: const Icon(Icons.lock_outline_rounded),
+                      labelText: 'Kata sandi',
+                      suffixIcon: IconButton(
+                        tooltip: showPassword
+                            ? 'Sembunyikan kata sandi'
+                            : 'Lihat kata sandi',
+                        icon: Icon(
+                          showPassword
+                              ? Icons.visibility_off
+                              : Icons.visibility,
+                        ),
+                        onPressed: () =>
+                            setState(() => showPassword = !showPassword),
+                      ),
+                    ),
+                    onSubmitted: (_) {
+                      if (!busy) login();
+                    },
+                  ),
+                  if (error != null)
+                    Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Semantics(
+                        liveRegion: true,
+                        child: Text(
+                          error!,
+                          style: const TextStyle(color: Colors.red),
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: 20),
+                  FilledButton(
+                    onPressed: busy ? null : login,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        if (busy) ...[
+                          const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                          const SizedBox(width: 10),
+                        ],
+                        Flexible(
+                          child: Text(
+                            busy ? 'Memeriksa akun…' : 'Masuk ke PKLify',
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                        if (!busy) ...[
+                          const SizedBox(width: 10),
+                          const Icon(Icons.arrow_forward_rounded, size: 18),
+                        ],
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Gunakan akun yang dibuat admin sekolah.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 12, color: Color(0xFF586982)),
+                  ),
+                ],
               ),
-              const Text(
-                'Gunakan akun yang dibuat admin sekolah.',
-                textAlign: TextAlign.center,
-              ),
-            ],
+            ),
           ),
         ),
       ),
@@ -359,9 +436,12 @@ class _HomeState extends State<Home> {
       final nextActivities =
           nextStudents
               .expand(
-                (s) =>
-                    rows(s['activities'])
-                        .map((a) => {...a, 'student_name': s['user']['nama']}),
+                (s) => rows(s['activities']).map(
+                  (a) => {
+                    ...a,
+                    'student_name': accountLabel(s['user']['nama']),
+                  },
+                ),
               )
               .toList()
             ..sort(
@@ -399,6 +479,29 @@ class _HomeState extends State<Home> {
     if (mounted) widget.logout();
   }
 
+  Future<void> confirmLogout() async {
+    final leave = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Keluar dari akun?'),
+        content: const Text(
+          'Kamu bisa masuk kembali untuk melanjutkan kegiatan PKL.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Batal'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Keluar'),
+          ),
+        ],
+      ),
+    );
+    if (leave == true && mounted) await logout();
+  }
+
   Future<void> openLocation(Json s) async {
     await Navigator.push<void>(
       context,
@@ -424,117 +527,190 @@ class _HomeState extends State<Home> {
       style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
     ),
   );
-  Widget banner(String title, String text) => Card(
-    color: blue,
-    child: Padding(
-      padding: const EdgeInsets.all(22),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(text, style: const TextStyle(color: Colors.white)),
-        ],
+  Widget banner(String title, String text) => WelcomeCard(title, text);
+  Widget activityTile(Json a) => Card(
+    child: InkWell(
+      onTap: () => edit(
+        ActivityDetail(
+          activity: a,
+          teacher: !student && !admin,
+          canRevise: student,
+        ),
       ),
-    ),
-  );
-  Widget activityTile(Json a) => tile(
-    '${a['title']} • ${a['status']}',
-    '${a['student_name'] ?? ''}\n${a['tanggal']} • ${a['kind']}',
-    tap: () => edit(
-      ActivityDetail(
-        activity: a,
-        teacher: !student && !admin,
-        canRevise: student,
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '${a['title']}',
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '${a['student_name'] ?? ''} • ${a['tanggal']} • ${a['kind']}',
+              style: const TextStyle(fontSize: 12, color: Color(0xFF586982)),
+            ),
+            const SizedBox(height: 10),
+            StatusLabel('${a['status']}'),
+          ],
+        ),
       ),
     ),
   );
   List<Widget> dashboard() {
     final a = acts;
     if (student) {
+      if (students.isEmpty) {
+        return [
+          const EmptyState(
+            'Data siswa belum tersedia',
+            'Muat ulang atau hubungi admin untuk memeriksa akun.',
+          ),
+        ];
+      }
       final s = students.first;
       final p = s['placement'];
       return [
         banner(
-          'Halo, ${widget.user['nama']}',
+          'Halo, ${accountLabel(widget.user['nama'])} 👋',
           p == null
               ? 'Penempatan belum diatur admin.'
-              : '${p['tempat']}\nPembimbing: ${p['guru']}',
+              : '${p['tempat']}\nPembimbing: ${accountLabel(p['guru'])}',
         ),
-        tile(
-          'Kehadiran ${rows(s['calendar']).where((r) => r['status'] == 'hadir').length} hari',
-          '${a.where((r) => r['kind'] == 'jurnal').length} jurnal • ${a.where((r) => r['kind'] == 'izin').length} pengajuan izin',
-        ),
+        MetricStrip([
+          (
+            '${rows(s['calendar']).where((r) => r['status'] == 'hadir').length}',
+            'Hari hadir',
+          ),
+          ('${a.where((r) => r['kind'] == 'jurnal').length}', 'Jurnal'),
+          ('${a.where((r) => r['kind'] == 'izin').length}', 'Izin'),
+        ]),
         if (p != null)
           tile(
             'Jadwal PKL',
-            '${p['start_date']} — ${p['end_date']}\nHari ${p['work_days']} (1=Senin, 7=Minggu)\n${p['start_time']}–${p['end_time']} • radius ${p['radius']} m',
+            '${p['start_date']} — ${p['end_date']}\n${workDays(p['work_days'])} • ${p['start_time']}–${p['end_time']}\nRadius presensi ${p['radius']} m',
           ),
         if (p?['latitude'] == null)
           tile(
             'Lokasi belum ditentukan',
             'Ajukan tempat PKL melalui halaman Profil. Sebelum disetujui, presensi diajukan sebagai kendala.',
+            tap: () => openLocation(s),
           ),
         heading('Aktivitas'),
-        ...{
-          'masuk': 'Presensi masuk',
-          'pulang': 'Presensi pulang',
-          'jurnal': 'Jurnal kegiatan',
-          'izin': 'Pengajuan izin',
-          'dokumentasi': 'Dokumentasi kegiatan',
-        }.entries.map(
-          (e) => tile(
-            e.value,
-            ['masuk', 'pulang'].contains(e.key)
-                ? 'Foto kamera dan lokasi terkini'
-                : e.key == 'izin'
-                ? 'Alasan, tanggal, dan foto bukti'
-                : 'Catat dan simpan kegiatan PKL',
-            tap: () => edit(ActivityForm(kind: e.key, placement: p)),
-          ),
+        LayoutBuilder(
+          builder: (context, bounds) {
+            final single =
+                bounds.maxWidth < 330 ||
+                MediaQuery.textScalerOf(context).scale(14) > 22;
+            const actions = [
+              (
+                'masuk',
+                'Presensi masuk',
+                'Mulai hari dengan foto dan lokasi',
+                Icons.login_rounded,
+              ),
+              (
+                'pulang',
+                'Presensi pulang',
+                'Catat waktu selesai kegiatan',
+                Icons.logout_rounded,
+              ),
+              (
+                'jurnal',
+                'Jurnal kegiatan',
+                'Ceritakan yang kamu pelajari',
+                Icons.edit_note_rounded,
+              ),
+              (
+                'izin',
+                'Pengajuan izin',
+                'Kirim alasan dan foto bukti',
+                Icons.event_note_rounded,
+              ),
+              (
+                'dokumentasi',
+                'Dokumentasi kegiatan',
+                'Abadikan kegiatan lewat kamera',
+                Icons.camera_alt_outlined,
+              ),
+            ];
+            return Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: actions
+                  .map(
+                    (action) => SizedBox(
+                      width: single
+                          ? bounds.maxWidth
+                          : (bounds.maxWidth - 12) / 2,
+                      child: ActionCard(
+                        title: action.$2,
+                        subtitle: action.$3,
+                        icon: action.$4,
+                        color: ['pulang', 'izin'].contains(action.$1)
+                            ? brandTeal
+                            : blue,
+                        onTap: () =>
+                            edit(ActivityForm(kind: action.$1, placement: p)),
+                      ),
+                    ),
+                  )
+                  .toList(),
+            );
+          },
         ),
+        heading('Aktivitas terbaru'),
+        if (a.isEmpty)
+          const EmptyState(
+            'Belum ada kegiatan',
+            'Mulai dengan presensi atau tulis jurnal pertamamu.',
+          ),
+        ...a.take(3).map(activityTile),
       ];
     }
     return [
       banner(
-        'Halo, ${widget.user['nama']}',
+        'Halo, ${accountLabel(widget.user['nama'])} 👋',
         admin
             ? 'Kelola akun dan penempatan PKL.'
             : 'Dashboard guru • siswa bimbingan Anda',
       ),
-      tile(
-        '${students.length} siswa ${admin ? 'terdaftar' : 'bimbingan'}',
-        '${a.length} aktivitas tercatat',
-      ),
+      MetricStrip([
+        ('${students.length}', admin ? 'Siswa terdaftar' : 'Siswa bimbingan'),
+        ('${a.length}', 'Aktivitas'),
+        ('${a.where((r) => r['status'] == 'menunggu').length}', 'Menunggu'),
+      ]),
+      heading('Perlu perhatian'),
       tile(
         '${a.where((r) => r['kind'] == 'jurnal' && r['status'] == 'menunggu').length} jurnal menunggu',
         'Periksa dan berikan umpan balik',
+        tap: () => setState(() => index = 1),
       ),
       tile(
         '${a.where((r) => r['kind'] == 'izin' && r['status'] == 'menunggu').length} izin menunggu',
         'Periksa foto bukti pengajuan',
+        tap: () => setState(() => index = 1),
       ),
       tile(
         '${a.where((r) => ['masuk', 'pulang'].contains(r['kind']) && r['status'] == 'menunggu').length} kendala presensi',
         'Periksa lokasi, foto, dan alasan siswa',
+        tap: () => setState(() => index = 1),
       ),
       heading('Lokasi PKL siswa'),
       ...students.map(
         (s) => tile(
-          s['user']['nama'],
+          accountLabel(s['user']['nama']),
           '${rows(s['locations']).where((r) => r['status'] == 'menunggu').length} pengajuan menunggu • ${s['placement']?['tempat'] ?? 'Belum diatur'}',
           tap: () => openLocation(s),
         ),
       ),
       heading('Aktivitas terbaru'),
-      if (a.isEmpty) const Text('Belum ada aktivitas siswa.'),
+      if (a.isEmpty)
+        const EmptyState(
+          'Belum ada aktivitas siswa.',
+          'Kegiatan siswa akan muncul di sini setelah dikirim.',
+        ),
       ...a.take(5).map(activityTile),
     ];
   }
@@ -553,7 +729,7 @@ class _HomeState extends State<Home> {
           LazySection(students.length, (_, i) {
             final s = students[i];
             return tile(
-              '${s['user']['nama']} • ${s['user']['identity']}',
+              '${accountLabel(s['user']['nama'])} • ${s['user']['identity']}',
               '${s['placement']?['tempat'] ?? 'Belum ada penempatan'}\n${(s['activities'] as List).length} aktivitas',
               tap: () => edit(StudentDetail(student: s, teacher: !admin)),
             );
@@ -562,7 +738,12 @@ class _HomeState extends State<Home> {
           heading(student ? 'Riwayat aktivitas saya' : 'Aktivitas siswa'),
         ),
         if (acts.isEmpty)
-          LazySection.single(const Text('Belum ada aktivitas tersimpan.')),
+          LazySection.single(
+            const EmptyState(
+              'Belum ada aktivitas tersimpan.',
+              'Riwayat dan hasil pemeriksaan akan tampil di sini.',
+            ),
+          ),
         LazySection(acts.length, (_, i) => activityTile(acts[i])),
         if (student) ...[
           LazySection.single(heading('Rekap hari kerja')),
@@ -577,7 +758,7 @@ class _HomeState extends State<Home> {
             final r = audit[i];
             return tile(
               r['action'],
-              '${r['created_at']} • ${r['nama']}\n${r['detail']}',
+              '${r['created_at']} • ${accountLabel(r['nama'])}\n${r['detail']}',
             );
           }),
         ],
@@ -587,6 +768,14 @@ class _HomeState extends State<Home> {
 
   List<Widget> grades() {
     if (student) {
+      if (students.isEmpty) {
+        return [
+          const EmptyState(
+            'Data siswa belum tersedia',
+            'Muat ulang untuk melihat penilaian.',
+          ),
+        ];
+      }
       final g = students.first['grade'];
       return g == null
           ? [
@@ -617,7 +806,7 @@ class _HomeState extends State<Home> {
       if (students.isEmpty) const Text('Belum ada siswa bimbingan.'),
       ...students.map(
         (s) => tile(
-          s['user']['nama'],
+          accountLabel(s['user']['nama']),
           s['grade'] == null
               ? 'Belum dinilai'
               : s['grade']['published_at'] == null
@@ -652,14 +841,15 @@ class _HomeState extends State<Home> {
     heading('Penempatan siswa'),
     ...students.map(
       (s) => tile(
-        '${s['user']['nama']} • ${s['user']['identity']}',
+        '${accountLabel(s['user']['nama'])} • ${s['user']['identity']}',
         '${s['placement']?['tempat'] ?? 'Belum diatur'}',
         tap: () =>
             edit(PlacementForm(student: s, teachers: rows(data?['teachers']))),
       ),
     ),
     heading('Guru terdaftar'),
-    ...rows(data?['teachers']).map((t) => tile(t['nama'], t['identity'])),
+    ...rows(data?['teachers'])
+        .map((t) => tile(accountLabel(t['nama']), t['identity'])),
   ];
   List<Widget> profile() {
     final s = student && students.isNotEmpty ? students.first : null;
@@ -683,27 +873,73 @@ class _HomeState extends State<Home> {
         ? 'Disetujui'
         : 'Belum mengajukan';
     return [
-      if (Api.localMode)
-        const Card(
+      ProfileIdentityCard(
+        name: accountLabel(widget.user['nama']),
+        role: student
+            ? 'Siswa'
+            : admin
+            ? 'Admin Sekolah'
+            : 'Guru Pembimbing',
+        identity:
+            '${student
+                ? 'NIS'
+                : admin
+                ? 'Username'
+                : 'NIP'}: ${widget.user['identity']}',
+        icon: student
+            ? Icons.school_rounded
+            : admin
+            ? Icons.admin_panel_settings_rounded
+            : Icons.supervisor_account_rounded,
+      ),
+      if (student) ...[
+        heading('Tempat PKL'),
+        Card(
           child: Padding(
-            padding: EdgeInsets.all(12),
-            child: Text(
-              'Demo lokal: progres tersimpan di perangkat/browser ini, tidak dikirim ke server. Data MySQL lama tidak ditampilkan. Jangan hapus data situs atau gunakan mode incognito. Gunakan alamat dan port browser yang sama setiap kali menjalankan aplikasi. Peta tetap membutuhkan internet.',
-            ),
-          ),
-        ),
-      banner(
-        widget.user['nama'],
-        student
-            ? 'NIS: ${widget.user['identity']}'
-                  '\n${s == null
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.business_rounded, color: brandTeal, size: 30),
+                const SizedBox(height: 12),
+                Text(
+                  s == null
                       ? 'Data tempat PKL belum dimuat'
                       : place == null
                       ? 'Tempat PKL belum diisi'
-                      : 'Tempat PKL: $place'}'
-                  '${s == null ? '' : '\nStatus: $status'}'
-            : '${widget.user['role']} • ${widget.user['identity']}',
-      ),
+                      : 'Tempat PKL: $place',
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Status: $status',
+                  style: const TextStyle(
+                    color: brandTeal,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                if (p != null) ...[
+                  const Divider(height: 28),
+                  Text(
+                    'Pembimbing: ${accountLabel(p['guru'])}',
+                    style: const TextStyle(height: 1.5),
+                  ),
+                  Text(
+                    '${workDays(p['work_days'])} • ${p['start_time']}–${p['end_time']}',
+                    style: const TextStyle(
+                      color: Color(0xFF586982),
+                      height: 1.5,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ],
       if (student && s != null) ...[
         if (proposed && '${latest['alamat'] ?? ''}'.isNotEmpty)
           Text('Alamat pengajuan: ${latest['alamat']}'),
@@ -736,11 +972,66 @@ class _HomeState extends State<Home> {
             'Admin perlu menetapkan guru pembimbing dan jadwal agar pengajuan bisa dikirim.',
           ),
       ],
-      const SizedBox(height: 12),
-      const Text(
-        'Data mengikuti akun yang masuk. Muat ulang untuk melihat pembaruan.',
+      heading('Ruang kerjamu'),
+      ProfileMenuItem(
+        icon: student ? Icons.history_rounded : Icons.groups_rounded,
+        title: student ? 'Kegiatan saya' : 'Siswa dan kegiatan',
+        subtitle: student
+            ? 'Lihat riwayat dan catatan pembimbing'
+            : 'Pantau perkembangan siswa bimbingan',
+        onTap: () {
+          setState(() => index = 1);
+          refresh(force: false);
+        },
       ),
-      OutlinedButton(onPressed: logout, child: const Text('Keluar dari akun')),
+      ProfileMenuItem(
+        icon: admin
+            ? Icons.manage_accounts_rounded
+            : Icons.workspace_premium_rounded,
+        title: admin
+            ? 'Pengaturan akun dan penempatan'
+            : student
+            ? 'Hasil penilaian'
+            : 'Penilaian siswa',
+        subtitle: admin
+            ? 'Kelola siswa, guru, dan jadwal PKL'
+            : student
+            ? 'Lihat nilai yang sudah diterbitkan'
+            : 'Periksa dan terbitkan nilai akhir',
+        onTap: () {
+          setState(() => index = 2);
+          refresh(force: false);
+        },
+      ),
+      Card(
+        child: ExpansionTile(
+          key: const PageStorageKey<String>('profile-about-pklify'),
+          leading: const Icon(Icons.info_outline_rounded, color: brandBlue),
+          title: const Text(
+            'Tentang PKLify',
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+          ),
+          subtitle: const Text(
+            'Informasi aplikasi dan penyimpanan',
+            style: TextStyle(fontSize: 12),
+          ),
+          childrenPadding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+          children: [
+            Text(
+              Api.localMode
+                  ? 'PKLify membantu mencatat kegiatan, presensi, dan penilaian PKL. Data saat ini tersimpan di perangkat ini dan belum tersinkron ke perangkat lain. Jangan hapus data aplikasi atau situs jika riwayat masih dibutuhkan.'
+                  : 'PKLify membantu mencatat kegiatan, presensi, dan penilaian PKL. Gunakan koneksi internet untuk mengirim dan melihat pembaruan kegiatan.',
+              style: const TextStyle(height: 1.6),
+            ),
+          ],
+        ),
+      ),
+      const SizedBox(height: 12),
+      OutlinedButton.icon(
+        onPressed: confirmLogout,
+        icon: const Icon(Icons.logout_rounded),
+        label: const Text('Keluar dari akun'),
+      ),
     ];
   }
 
@@ -785,16 +1076,22 @@ class _HomeState extends State<Home> {
               ],
             ),
           Expanded(
-            child: RefreshIndicator(
-              onRefresh: refresh,
-              child: index == 1 && data != null
-                  ? history()
-                  : ListView(
-                      key: PageStorageKey('home-$index'),
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      padding: const EdgeInsets.all(20),
-                      children: content,
-                    ),
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 760),
+                child: RefreshIndicator(
+                  onRefresh: refresh,
+                  child: index == 1 && data != null
+                      ? history()
+                      : ListView(
+                          key: PageStorageKey('home-$index'),
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          padding: const EdgeInsets.all(20),
+                          children: content,
+                        ),
+                ),
+              ),
             ),
           ),
         ],
@@ -838,9 +1135,9 @@ class PlacementForm extends StatelessWidget {
     final p = student['placement'] as Json? ?? {};
     String v(String k, [String fallback = '']) => '${p[k] ?? fallback}';
     return DataForm(
-      title: 'Penempatan ${student['user']['nama']}',
+      title: 'Penempatan ${accountLabel(student['user']['nama'])}',
       description:
-          'Guru tersedia: ${teachers.map((t) => "ID ${t['id']}: ${t['nama']}").join('; ')}.\nAtur guru dan jadwal di sini. Titik dan alamat diatur melalui menu Lokasi PKL pada beranda. Perubahan guru membatalkan pengajuan lokasi yang menunggu. Perubahan jadwal mengembalikan nilai terbit ke draf.',
+          'Guru tersedia: ${teachers.map((t) => "ID ${t['id']}: ${accountLabel(t['nama'])}").join('; ')}.\nAtur guru dan jadwal di sini. Titik dan alamat diatur melalui menu Lokasi PKL pada beranda. Perubahan guru membatalkan pengajuan lokasi yang menunggu. Perubahan jadwal mengembalikan nilai terbit ke draf.',
       fields: [
         Field(
           'guru_id',
@@ -1342,7 +1639,7 @@ class StudentDetail extends StatelessWidget {
     final audit = rows(student['audit']);
     const heading = TextStyle(fontSize: 20, fontWeight: FontWeight.bold);
     return Scaffold(
-      appBar: AppBar(title: Text(student['user']['nama'])),
+      appBar: AppBar(title: Text(accountLabel(student['user']['nama']))),
       body: LazySections(
         sections: [
           LazySection.single(
@@ -1390,7 +1687,7 @@ class StudentDetail extends StatelessWidget {
             return ListTile(
               title: Text(a['action']),
               subtitle: Text(
-                '${a['created_at']} • ${a['nama']}\n${a['detail']}',
+                '${a['created_at']} • ${accountLabel(a['nama'])}\n${a['detail']}',
               ),
             );
           }),
@@ -1407,7 +1704,7 @@ class GradeForm extends StatelessWidget {
   Widget build(BuildContext context) {
     final g = student['grade'];
     return DataForm(
-      title: 'Nilai ${student['user']['nama']}',
+      title: 'Nilai ${accountLabel(student['user']['nama'])}',
       description:
           'Kehadiran otomatis (20%): ${student['attendance_score'] ?? 'belum dapat dihitung'}.\nIsi kualitas jurnal (30%) dan kinerja/sikap (50%) berdasarkan pemeriksaan. Nilai diterbitkan setelah periode selesai dan semua aktivitas diperiksa.',
       fields: [

@@ -822,7 +822,7 @@ class LocalBackend {
         ((bytes.length + 2) ~/ 3) * 4;
     if (total > 40 * 1024 * 1024) {
       fail(
-        'Penyimpanan lampiran demo mencapai batas 30 MB. Gunakan file yang lebih kecil.',
+        'Penyimpanan lampiran mencapai batas 30 MB. Gunakan file yang lebih kecil.',
       );
     }
     await _files.record(a['id']).put(txn, base64Encode(bytes));

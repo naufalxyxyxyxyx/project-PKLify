@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'api.dart';
 import 'map_picker.dart';
+import 'app_ui.dart';
 
 typedef LocationJson = Map<String, dynamic>;
 List<LocationJson> locationRows(dynamic value) => (value as List? ?? [])
@@ -134,7 +135,7 @@ class _LocationPageState extends State<LocationPage> {
                 if (error != null)
                   Text(error!, style: const TextStyle(color: Colors.red)),
                 Text(
-                  '${student['user']['nama']}',
+                  accountLabel(student['user']['nama']),
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
                 const SizedBox(height: 12),
